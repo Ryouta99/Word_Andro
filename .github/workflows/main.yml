@@ -1,0 +1,63 @@
+name: build-apk
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      WORDCRAFT_ANDROID_ABIS: arm64-v8a
+      WORDCRAFT_ANDROID_VARIANT: debug
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract the project
+        run: unzip -q wordcraft-android.zip
+
+      - name: Rust toolchain and Android target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wordcraft-main
+
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Android NDK
+        run: |
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}"
+          if [ -z "$ndk" ] || [ ! -d "$ndk" ]; then
+            echo "::error::no Android NDK on this runner"
+            exit 1
+          fi
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        working-directory: wordcraft-main
+        run: bash packaging/android/package.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wordcraft-android-apk
+          path: wordcraft-main/dist/release/*.apk
+          if-no-files-found: error
